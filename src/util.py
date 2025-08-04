@@ -44,3 +44,27 @@ def load_all_pickles_from_drive(source_folder=SOURCE_FOLDER):
             print(f"Loaded {df_name} from {filepath}")
 
     return data_frames
+def check_duplicate_indices(dfs: dict) -> None:
+    """
+    Checks for duplicated indices in a dictionary of DataFrames.
+    Prints the names of DataFrames with non-unique indices and shows the duplicated entries.
+
+    Args:
+        dfs (dict): Dictionary of {name: DataFrame}.
+    """
+    for name, df in dfs.items():
+        idx = df.index if isinstance(df.index, pd.DatetimeIndex) else df.get('Date')
+
+        if idx is None:
+            print(f"[WARNING] '{name}' has no recognizable date index or 'Date' column.")
+            continue
+
+        # Convert to datetime if not already
+        idx = pd.to_datetime(idx, errors='coerce')
+        duplicated = idx[idx.duplicated(keep=False)]
+
+        if not duplicated.empty:
+            print(f"\n[❗] Duplicated dates found in '{name}':")
+            print(duplicated.value_counts().sort_index())
+        else:
+            print(f"[OK] '{name}' has unique dates.")

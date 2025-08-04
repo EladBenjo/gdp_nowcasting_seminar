@@ -81,6 +81,25 @@ def clean_month_year(series):
 
     return series.apply(parse_date)
 
+def set_monthly_dates_from_start(df: pd.DataFrame, start_date: str = '1996-01-01') -> pd.DataFrame:
+    """
+    Assigns a monthly DatetimeIndex starting from a given start_date.
+
+    Args:
+        df (pd.DataFrame): The DataFrame to update.
+        start_date (str): The date to start from (default is '1996-01-01').
+
+    Returns:
+        pd.DataFrame: DataFrame with a new 'Date' column and datetime index.
+    """
+    n = len(df)
+    dates = pd.date_range(start=start_date, periods=n, freq='MS')  # 'MS' = Month Start
+    df = df.copy()
+    df['Date'] = dates
+    df.set_index('Date', inplace=True)
+    return df
+
+
 def convert_object_columns_to_float(df):
     """
     Converts all columns of type 'object' to 'float', excluding the 'Date' column.
@@ -119,28 +138,90 @@ def clean_percentage_columns(df):
                     print(f"Could not convert column '{col}' to float: {e}")
     return df
 
-def print_date_range(df, date_column='Date'):
+def print_date_range(df, df_name="DataFrame"):
     """
-    Prints the earliest and latest dates in a DataFrame's date column.
+    Prints the earliest and latest date in a DataFrame, prioritizing:
+    1. A column named 'Date'
+    2. A DatetimeIndex
+    3. Any other datetime-like column
 
     Args:
         df (pd.DataFrame): The input DataFrame.
-        date_column (str): The name of the column containing date values.
+        df_name (str): Optional name of the DataFrame for display.
     """
-    if date_column not in df.columns:
-        print(f"Error: Date column '{date_column}' not found in the DataFrame.")
+    print(f"\n[INFO] Processing '{df_name}'")
+
+    # Case 1: 'Date' column
+    if 'Date' in df.columns:
+        date_series = pd.to_datetime(df['Date'], errors='coerce')
+        valid_dates = date_series.dropna()
+        if not valid_dates.empty:
+            print("[INFO] Using 'Date' column")
+            print(f"Earliest date: {valid_dates.min()}")
+            print(f"Latest date: {valid_dates.max()}")
+            return
+
+    # Case 2: DatetimeIndex
+    if isinstance(df.index, pd.DatetimeIndex):
+        print("[INFO] Using DatetimeIndex")
+        print(f"Earliest date: {df.index.min()}")
+        print(f"Latest date: {df.index.max()}")
         return
 
-    # Ensure the date column is in datetime format
-    df[date_column] = pd.to_datetime(df[date_column], errors='coerce')
+    # Case 3: Find any datetime-like column
+    for col in df.columns:
+        converted = pd.to_datetime(df[col], errors='coerce')
+        if converted.notna().sum() > 0:
+            print(f"[INFO] Using datetime column: '{col}'")
+            print(f"Earliest date: {converted.min()}")
+            print(f"Latest date: {converted.max()}")
+            return
 
-    # Drop rows where date conversion failed
-    df_cleaned = df.dropna(subset=[date_column])
+    print("[WARNING] No datetime information found.")
 
-    if not df_cleaned.empty:
-        earliest_date = df_cleaned[date_column].min()
-        latest_date = df_cleaned[date_column].max()
-        print(f"Earliest date: {earliest_date}")
-        print(f"Latest date: {latest_date}")
-    else:
-        print(f"No valid dates found in the '{date_column}' column.")
+import pandas as pd
+
+def merge_series_freq(dfs: dict, date_column: str = 'Date') -> pd.DataFrame:
+    """
+    Merges multiple daily DataFrames using an outer join on the date index.
+
+    Args:
+        dfs (dict): Dictionary of {name: DataFrame}, where each DataFrame is daily
+                    and has either a DatetimeIndex or a 'Date' column.
+        date_column (str): Optional, name of the date column if not using DatetimeIndex.
+
+    Returns:
+        pd.DataFrame: Merged DataFrame with a complete date range and all series aligned.
+    """
+    standardized_dfs = []
+
+    for name, df in dfs.items():
+        # Copy to avoid modifying original
+        df = df.copy()
+
+        # Case 1: DatetimeIndex
+        if isinstance(df.index, pd.DatetimeIndex):
+            temp = df
+            temp.index.name = 'Date'
+
+        # Case 2: Has date column
+        elif date_column in df.columns:
+            df[date_column] = pd.to_datetime(df[date_column], errors='coerce')
+            temp = df.set_index(date_column)
+            temp.index.name = 'Date'
+
+        else:
+            raise ValueError(f"[ERROR] No datetime info found in '{name}'.")
+
+        # Rename columns to include source name
+        temp = temp.add_prefix(f"{name}_")
+        standardized_dfs.append(temp)
+
+    # Outer join on full date range
+    merged_df = pd.concat(standardized_dfs, axis=1, join='outer')
+
+    # Sort index for consistency
+    merged_df = merged_df.sort_index()
+
+    return merged_df
+
